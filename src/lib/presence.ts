@@ -31,10 +31,20 @@ export type StoredPresence = "online" | "away";
 /** What a viewer sees — adds the derived 'offline' state. */
 export type PresenceStatus = "online" | "away" | "offline";
 
+/**
+ * Manual operational status, set by the agent from the account menu
+ * (see set_agent_status in 037_agent_status.sql). Unlike
+ * StoredPresence, this is never touched by the connection heartbeat —
+ * it only changes on an explicit choice, and stays until the agent
+ * changes it again.
+ */
+export type AgentStatus = "available" | "busy" | "paused";
+
 /** Raw presence row as read from the `member_presence` table. */
 export interface PresenceRow {
   status: StoredPresence;
   last_seen_at: string;
+  agent_status: AgentStatus;
 }
 
 /**
@@ -106,6 +116,18 @@ export function presenceLabel(
       return "Away — idle";
     case "offline":
       return `Offline — last seen ${formatLastSeen(lastSeenAt, now)}`;
+  }
+}
+
+/** Label for the agent_status badge shown next to a presence dot. */
+export function agentStatusLabel(status: AgentStatus): string {
+  switch (status) {
+    case "available":
+      return "Available";
+    case "busy":
+      return "Busy";
+    case "paused":
+      return "Paused";
   }
 }
 

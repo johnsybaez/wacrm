@@ -22,6 +22,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
@@ -67,7 +68,7 @@ import { RequireRole } from '@/components/auth/require-role';
 import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
 import type { AccountRole } from '@/lib/auth/roles';
-import { presenceLabel, summarize } from '@/lib/presence';
+import { agentStatusLabel, presenceLabel, summarize } from '@/lib/presence';
 import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
@@ -128,11 +129,14 @@ export function MembersTab() {
   const t = useTranslations('Settings.members');
   const tRoles = useTranslations('Settings.roles');
   const { user, canManageMembers } = useAuth();
-  const { getPresence, getRow, now } = usePresence();
+  const { getPresence, getRow, getAgentStatus, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openConversationsByAgent, setOpenConversationsByAgent] = useState<
+    Map<string, number>
+  >(new Map());
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
@@ -179,6 +183,35 @@ export function MembersTab() {
   useEffect(() => {
     void loadEverything();
   }, [loadEverything]);
+
+  // Open-conversation count per assigned agent — client-side grouping,
+  // same pattern as loadPipelineDonut in dashboard/queries.ts. RLS
+  // scopes the query to the caller's account already.
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from('conversations')
+      .select('assigned_agent_id')
+      .eq('status', 'open')
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error('[MembersTab] open conversations count error:', error.message);
+          return;
+        }
+        const counts = new Map<string, number>();
+        for (const row of data ?? []) {
+          const agentId = row.assigned_agent_id as string | null;
+          if (!agentId) continue;
+          counts.set(agentId, (counts.get(agentId) ?? 0) + 1);
+        }
+        setOpenConversationsByAgent(counts);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleRoleChange(member: Member, nextRole: AccountRole) {
     if (member.role === nextRole) return;
@@ -338,6 +371,7 @@ export function MembersTab() {
                 presenceRow?.last_seen_at ?? null,
                 now,
               );
+              const agentStatus = getAgentStatus(member.user_id);
 
               return (
                 <li
@@ -390,10 +424,22 @@ export function MembersTab() {
                             {t('you')}
                           </Badge>
                         )}
+                        {agentStatus !== 'available' && (
+                          <Badge className="bg-muted text-muted-foreground border-border text-[10px] uppercase tracking-wide">
+                            {agentStatusLabel(agentStatus)}
+                          </Badge>
+                        )}
                       </div>
                       {member.email && (
                         <p className="truncate text-xs text-muted-foreground">
                           {member.email}
+                        </p>
+                      )}
+                      {(openConversationsByAgent.get(member.user_id) ?? 0) > 0 && (
+                        <p className="truncate text-xs text-muted-foreground">
+                          {t('openConversations', {
+                            count: openConversationsByAgent.get(member.user_id) ?? 0,
+                          })}
                         </p>
                       )}
                     </div>

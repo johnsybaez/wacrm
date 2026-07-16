@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { usePresence } from "@/hooks/use-presence";
+import { createClient } from "@/lib/supabase/client";
+import type { AgentStatus } from "@/lib/presence";
+import { Check, LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -17,6 +20,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
+
+const AGENT_STATUSES: AgentStatus[] = ["available", "busy", "paused"];
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -48,8 +53,20 @@ import { useTranslations } from "next-intl";
 export function Header({ onOpenSidebar }: HeaderProps) {
   const t = useTranslations("Header");
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
+  const { getAgentStatus } = usePresence();
   const titleKey = getPageTitleKey(pathname);
+  const currentAgentStatus = user ? getAgentStatus(user.id) : "available";
+
+  const handleAgentStatusChange = async (status: AgentStatus) => {
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_agent_status", {
+      p_status: status,
+    });
+    if (error) {
+      console.error("Failed to update agent status:", error.message);
+    }
+  };
 
   const initial =
     profile?.full_name?.charAt(0)?.toUpperCase() ??
@@ -109,6 +126,26 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               {profile?.email ?? ""}
             </p>
           </div>
+          <DropdownMenuSeparator className="bg-border" />
+          <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+            {t("statusLabel")}
+          </div>
+          {AGENT_STATUSES.map((status) => (
+            <DropdownMenuItem
+              key={status}
+              onClick={() => handleAgentStatusChange(status)}
+              className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+            >
+              <Check
+                className={
+                  status === currentAgentStatus
+                    ? "size-4 opacity-100"
+                    : "size-4 opacity-0"
+                }
+              />
+              {t(`status_${status}`)}
+            </DropdownMenuItem>
+          ))}
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             render={

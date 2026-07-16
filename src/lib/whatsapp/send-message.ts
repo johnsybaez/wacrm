@@ -84,6 +84,10 @@ export interface SendMessageParams {
   /** Structured payload for `messageType === 'interactive'`. */
   interactivePayload?: InteractiveMessagePayload | null;
   replyToMessageId?: string | null;
+  /** The signed-in agent sending this message, for `messages.sender_id`.
+   *  Left unset by callers with no authenticated agent (e.g. the
+   *  service-role public API). */
+  senderId?: string | null;
 }
 
 export interface SendMessageResult {
@@ -197,6 +201,7 @@ export async function sendMessageToConversation(
     templateMessageParams,
     interactivePayload,
     replyToMessageId,
+    senderId,
   } = params;
 
   if (!conversationId) {
@@ -453,6 +458,7 @@ export async function sendMessageToConversation(
     .insert({
       conversation_id: conversationId,
       sender_type: 'agent',
+      sender_id: senderId || null,
       content_type: messageType,
       content_text: interactiveBody ?? contentText ?? null,
       media_url: mediaUrl || null,

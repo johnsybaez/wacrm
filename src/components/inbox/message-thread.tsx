@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
-import { presenceLabel } from "@/lib/presence";
+import { agentStatusLabel, presenceLabel } from "@/lib/presence";
 import { cn } from "@/lib/utils";
 import type {
   Conversation,
@@ -56,6 +56,14 @@ interface ReplyDraft {
   id: string;
   authorLabel: string;
   preview: string;
+}
+
+interface AssignmentEvent {
+  id: string;
+  previous_agent_id: string | null;
+  new_agent_id: string | null;
+  changed_by: string | null;
+  created_at: string;
 }
 
 function renderTemplateBody(body: string, params: string[]): string {
@@ -173,11 +181,13 @@ export function MessageThread({
   const tQuote = useTranslations("Inbox.replyQuote");
 
   const { user } = useAuth();
-  const { getPresence, getRow, now } = usePresence();
+  const { getPresence, getRow, getAgentStatus, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [assignmentEvents, setAssignmentEvents] = useState<AssignmentEvent[]>([]);
+  const [showAssignmentHistory, setShowAssignmentHistory] = useState(false);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
   // refetch is fire-and-forget through `onRefresh` (which bumps the
@@ -225,6 +235,40 @@ export function MessageThread({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!conversation?.id) {
+      setAssignmentEvents([]);
+      return;
+    }
+    const currentConversationId = conversation.id;
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from("conversation_assignment_events")
+      .select("id, previous_agent_id, new_agent_id, changed_by, created_at")
+      .eq("conversation_id", currentConversationId)
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error("Failed to fetch assignment history:", error);
+          return;
+        }
+        setAssignmentEvents((data as AssignmentEvent[]) ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation?.id]);
+
+  const profileName = useCallback(
+    (userId: string | null): string => {
+      if (!userId) return t("unassigned");
+      return profiles.find((p) => p.user_id === userId)?.full_name ?? t("unknownAgent");
+    },
+    [profiles, t],
+  );
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -1014,6 +1058,7 @@ export function MessageThread({
                 profiles.map((p) => {
                   const isSelected = p.user_id === assignedAgentId;
                   const presence = getPresence(p.user_id);
+                  const agentStatus = getAgentStatus(p.user_id);
                   return (
                     <DropdownMenuItem
                       key={p.id}
@@ -1036,6 +1081,11 @@ export function MessageThread({
                         {p.full_name}
                         {p.user_id === user?.id ? t("me") : ""}
                       </span>
+                      {agentStatus !== "available" && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {agentStatusLabel(agentStatus)}
+                        </span>
+                      )}
                       {isSelected && <Check className="ml-2 h-3 w-3" />}
                     </DropdownMenuItem>
                   );
@@ -1054,8 +1104,37 @@ export function MessageThread({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {assignmentEvents.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAssignmentHistory((v) => !v)}
+              className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md text-muted-foreground hover:bg-muted"
+            >
+              <Clock className="h-3 w-3" />
+              <span className="hidden sm:inline">
+                {t("assignmentHistory", { count: assignmentEvents.length })}
+              </span>
+            </button>
+          )}
         </div>
       </div>
+
+      {showAssignmentHistory && assignmentEvents.length > 0 && (
+        <div className="border-b border-border bg-muted/30 px-4 py-2">
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {assignmentEvents.map((ev) => (
+              <li key={ev.id}>
+                {t("assignmentHistoryEntry", {
+                  from: profileName(ev.previous_agent_id),
+                  to: profileName(ev.new_agent_id),
+                  date: format(new Date(ev.created_at), "MMM d, HH:mm"),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">

@@ -452,15 +452,24 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('assign_conversation needs a contact')
       let agentId = cfg.agent_id
       if (cfg.mode === 'round_robin') {
-        // Pick any member of the account. The existing implementation
-        // only ever returned the automation's author; preserving that
-        // shape until a real round-robin algorithm replaces it.
+        // Pick any member of the account, skipping agents who marked
+        // themselves 'paused' (member_presence.agent_status). The
+        // existing implementation only ever returned the automation's
+        // author; preserving that shape until a real round-robin
+        // algorithm replaces it — this just keeps paused agents out of
+        // the pool.
+        const { data: pausedRows } = await db
+          .from('member_presence')
+          .select('user_id')
+          .eq('account_id', args.automation.account_id)
+          .eq('agent_status', 'paused')
+        const pausedIds = new Set((pausedRows ?? []).map((r) => r.user_id))
+
         const { data: profiles } = await db
           .from('profiles')
           .select('user_id')
           .eq('account_id', args.automation.account_id)
-          .limit(1)
-        agentId = profiles?.[0]?.user_id
+        agentId = profiles?.find((p) => !pausedIds.has(p.user_id))?.user_id
       }
       if (!agentId) return 'no agent resolved'
       await db

@@ -2,13 +2,14 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import {
   CONVERSATION_SELECT,
   matchesContactFilters,
   normalizeConversations,
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
-import type { Conversation, ConversationStatus, Tag } from "@/types";
+import type { Conversation, ConversationStatus, Profile, Tag } from "@/types";
 import { Search, ChevronDown, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -54,7 +55,8 @@ export function ConversationList({
   resyncToken = 0,
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
-  
+  const { user } = useAuth();
+
   const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = useMemo(() => [
     { label: t("filterAll"), value: "all" },
     { label: t("filterUnread"), value: "unread" },
@@ -72,6 +74,9 @@ export function ConversationList({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // "all" | "me" | a specific agent's user_id.
+  const [selectedAgent, setSelectedAgent] = useState<string>("all");
+  const [profiles, setProfiles] = useState<Profile[]>([]);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -140,6 +145,23 @@ export function ConversationList({
     };
   }, []);
 
+  // Account profiles for the "assigned to" filter — loaded once, same
+  // pattern as the inbox thread's Assign dropdown.
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("full_name");
+      if (!cancelled && data) setProfiles(data as Profile[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Company options are derived from the loaded conversations — there's no
   // separate companies table, and only companies with a live conversation
   // are worth offering as an inbox filter.
@@ -177,6 +199,12 @@ export function ConversationList({
       );
     }
 
+    if (selectedAgent === "me") {
+      result = result.filter((c) => c.assigned_agent_id === user?.id);
+    } else if (selectedAgent !== "all") {
+      result = result.filter((c) => c.assigned_agent_id === selectedAgent);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) => {
@@ -188,7 +216,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, selectedTagIds, selectedCompany, selectedAgent, user?.id]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -345,6 +373,70 @@ export function ConversationList({
                     )}
                   >
                     <span className="truncate">{co}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {profiles.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  "inline-flex max-w-40 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  selectedAgent !== "all"
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span className="truncate">
+                  {selectedAgent === "all"
+                    ? t("assignedTo")
+                    : selectedAgent === "me"
+                      ? t("assignedToMe")
+                      : profiles.find((p) => p.user_id === selectedAgent)
+                          ?.full_name ?? t("assignedTo")}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-64 w-56 border-border bg-popover"
+              >
+                <DropdownMenuItem
+                  onClick={() => setSelectedAgent("all")}
+                  className={cn(
+                    "text-sm",
+                    selectedAgent === "all"
+                      ? "text-primary"
+                      : "text-popover-foreground"
+                  )}
+                >
+                  {t("assignedToAnyone")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setSelectedAgent("me")}
+                  className={cn(
+                    "text-sm",
+                    selectedAgent === "me"
+                      ? "text-primary"
+                      : "text-popover-foreground"
+                  )}
+                >
+                  {t("assignedToMe")}
+                </DropdownMenuItem>
+                {profiles.map((p) => (
+                  <DropdownMenuItem
+                    key={p.id}
+                    onClick={() => setSelectedAgent(p.user_id)}
+                    className={cn(
+                      "text-sm",
+                      selectedAgent === p.user_id
+                        ? "text-primary"
+                        : "text-popover-foreground"
+                    )}
+                  >
+                    <span className="truncate">{p.full_name}</span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>

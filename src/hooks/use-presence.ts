@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
   derivePresence,
+  type AgentStatus,
   type PresenceRow,
   type PresenceStatus,
   type StoredPresence,
@@ -26,6 +27,8 @@ interface UsePresenceResult {
   getPresence: (userId: string) => PresenceStatus;
   /** Raw row for tooltips ("last seen …"). */
   getRow: (userId: string) => PresenceRow | undefined;
+  /** Manual operational status (defaults to 'available' if unseen). */
+  getAgentStatus: (userId: string) => AgentStatus;
   /**
    * The clock value the hook is currently deriving against. Pass this
    * to `presenceLabel` / `formatLastSeen` so labels stay in lockstep
@@ -44,6 +47,19 @@ interface UsePresenceResult {
  */
 export function usePresence(enabled = true): UsePresenceResult {
   const { accountId } = useAuth();
+
+  // Multiple components (header, members roster, inbox thread) mount
+  // this hook at once. Supabase Realtime channels are keyed by topic
+  // name, so two instances sharing `presence:${accountId}` collide —
+  // the second `.channel()` call reuses the already-subscribed first
+  // one, and its `.on(...)` throws "cannot add postgres_changes
+  // callbacks ... after subscribe()". A per-instance suffix keeps each
+  // mount's channel topic unique.
+  const instanceId = useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2),
+  ).current;
 
   // Presence rows keyed by user_id, held in immutable state — each
   // update replaces the Map so React renders and the derived getters
@@ -65,12 +81,14 @@ export function usePresence(enabled = true): UsePresenceResult {
       user_id: string;
       status: StoredPresence;
       last_seen_at: string;
+      agent_status: AgentStatus;
     }) => {
       setRows((prev) => {
         const next = new Map(prev);
         next.set(row.user_id, {
           status: row.status,
           last_seen_at: row.last_seen_at,
+          agent_status: row.agent_status,
         });
         return next;
       });
@@ -81,7 +99,7 @@ export function usePresence(enabled = true): UsePresenceResult {
     // rather than replacing the map — so an event that lands while the
     // fetch is in flight isn't clobbered by a staler snapshot row.
     const channel: RealtimeChannel = supabase
-      .channel(`presence:${accountId}`)
+      .channel(`presence:${accountId}:${instanceId}`)
       .on(
         "postgres_changes",
         {
@@ -107,6 +125,7 @@ export function usePresence(enabled = true): UsePresenceResult {
               user_id: string;
               status: StoredPresence;
               last_seen_at: string;
+              agent_status: AgentStatus;
             },
           );
         },
@@ -115,7 +134,7 @@ export function usePresence(enabled = true): UsePresenceResult {
 
     supabase
       .from("member_presence")
-      .select("user_id, status, last_seen_at")
+      .select("user_id, status, last_seen_at, agent_status")
       .eq("account_id", accountId)
       .then(({ data, error }) => {
         if (cancelled) return;
@@ -130,6 +149,7 @@ export function usePresence(enabled = true): UsePresenceResult {
             const incoming: PresenceRow = {
               status: r.status as StoredPresence,
               last_seen_at: r.last_seen_at as string,
+              agent_status: r.agent_status as AgentStatus,
             };
             const existing = next.get(userId);
             // A live event that arrived first must win over a staler
@@ -167,5 +187,10 @@ export function usePresence(enabled = true): UsePresenceResult {
     [rows, now],
   );
 
-  return { getPresence, getRow, now };
+  const getAgentStatus = useCallback(
+    (userId: string): AgentStatus => rows.get(userId)?.agent_status ?? "available",
+    [rows],
+  );
+
+  return { getPresence, getRow, getAgentStatus, now };
 }
