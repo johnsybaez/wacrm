@@ -1,8 +1,47 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Per-request nonce for the CSP script-src allowlist. `strict-dynamic`
+// means only scripts carrying this nonce (or loaded by one) execute —
+// see src/app/layout.tsx, which reads it back via `headers()` and
+// passes it to the theme-boot <Script>. Web Crypto's global `crypto`
+// is used (not `node:crypto`) because this file runs on the Edge
+// runtime, where the Node module isn't available.
+function buildCsp(nonce: string): string {
+  const scriptSrc = [
+    "'self'",
+    `'nonce-${nonce}'`,
+    "'strict-dynamic'",
+    // Fallback for browsers predating nonce/strict-dynamic support —
+    // ignored by any browser that understands the nonce (CSP2+).
+    "'unsafe-inline'",
+    // Next.js dev tooling (React Refresh) needs eval; never ship this
+    // to production.
+    ...(process.env.NODE_ENV !== 'production' ? ["'unsafe-eval'"] : []),
+  ].join(' ')
+
+  return [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline'",
+    'img-src \'self\' data: blob: https:',
+    "media-src 'self' blob: https://*.supabase.co",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ')
+}
+
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  const nonce = crypto.randomUUID().replace(/-/g, '')
+  const csp = buildCsp(nonce)
+
+  const requestHeaders = new Headers(request.headers)
+  requestHeaders.set('x-nonce', nonce)
+
+  let supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,7 +53,7 @@ export async function middleware(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
+          supabaseResponse = NextResponse.next({ request: { headers: requestHeaders } })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           )
@@ -35,10 +74,13 @@ export async function middleware(request: NextRequest) {
   // the session wedges — the user gets a broken reload after idling and
   // can only recover by manually clearing cookies (issue #288). Copy the
   // refreshed cookies onto whatever response we hand back to fix that.
+  // Also stamps the per-request CSP (with its nonce) onto every response
+  // path, since next.config.ts no longer sets a static CSP header.
   const withRefreshedCookies = <T extends NextResponse>(response: T): T => {
     supabaseResponse.cookies.getAll().forEach((cookie) => {
       response.cookies.set(cookie)
     })
+    response.headers.set('Content-Security-Policy', csp)
     return response
   }
 
@@ -85,7 +127,7 @@ export async function middleware(request: NextRequest) {
     )
   }
 
-  return supabaseResponse
+  return withRefreshedCookies(supabaseResponse)
 }
 
 export const config = {

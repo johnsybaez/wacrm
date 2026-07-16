@@ -48,6 +48,21 @@ export async function GET(
       )
     }
 
+    // Confirm this mediaId actually belongs to a message in the
+    // caller's account before proxying it — otherwise any signed-in
+    // user could pull an arbitrary Meta media id through their own
+    // account's access token. The webhook stores media_url as exactly
+    // `/api/whatsapp/media/<mediaId>` (see api/whatsapp/webhook/route.ts).
+    const { data: ownedMessage } = await supabase
+      .from('messages')
+      .select('id, conversations!inner(account_id)')
+      .eq('conversations.account_id', accountId)
+      .eq('media_url', `/api/whatsapp/media/${mediaId}`)
+      .maybeSingle()
+    if (!ownedMessage) {
+      return NextResponse.json({ error: 'Media not found' }, { status: 404 })
+    }
+
     // Fetch and decrypt WhatsApp config
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
@@ -77,7 +92,7 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
+        'Cache-Control': 'private, max-age=86400',
       },
     })
   } catch (error) {

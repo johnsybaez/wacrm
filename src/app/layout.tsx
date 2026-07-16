@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import { NextIntlClientProvider } from 'next-intl';
 import { getLocale, getMessages } from 'next-intl/server';
 import { Inter } from "next/font/google";
@@ -84,6 +85,9 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale();
   const messages = await getMessages();
+  // Set by src/middleware.ts on every request — required by the CSP's
+  // script-src 'nonce-...' so this inline script isn't blocked.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
 
   return (
     <html
@@ -104,6 +108,7 @@ export default async function RootLayout({
         <Script
           id="theme-boot"
           strategy="beforeInteractive"
+          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }}
         />
       </head>

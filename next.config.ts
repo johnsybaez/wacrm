@@ -6,12 +6,12 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 /**
  * Baseline security headers applied to every response.
  *
- * CSP ships as `Content-Security-Policy-Report-Only` so the browser
- * surfaces violations in the console without blocking anything — once
- * we have confidence nothing legit trips it (two deploys, a pass on
- * every route), flip the key to `Content-Security-Policy` to enforce.
+ * Content-Security-Policy is NOT here — it needs a fresh nonce per
+ * request (for script-src 'strict-dynamic'), which a static header
+ * list can't provide. It's set in src/middleware.ts instead, on every
+ * response path.
  *
- * The rest of the headers are straight blocks, safe to enforce today:
+ * These are straight blocks, safe to enforce unconditionally:
  *   - HSTS: only meaningful on HTTPS (no-op on http://localhost).
  *   - X-Content-Type-Options / X-Frame-Options / Referrer-Policy:
  *     baseline OWASP hardening, no behavioural cost.
@@ -34,32 +34,6 @@ const SECURITY_HEADERS = [
     // the camera / geolocation / etc.
     key: "Permissions-Policy",
     value: "camera=(), microphone=(self), geolocation=(), payment=(), usb=()",
-  },
-  {
-    key: "Content-Security-Policy-Report-Only",
-    value: [
-      "default-src 'self'",
-      // Next.js needs 'unsafe-inline' for its inline hydration script
-      // and 'unsafe-eval' in dev + some production optimisations.
-      // Nonce-based CSP is a later project.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      // Tailwind + inline style attributes on lots of components.
-      "style-src 'self' 'unsafe-inline'",
-      // Supabase public-bucket avatars, contact avatars (arbitrary
-      // https URLs paste-able from the UI), OG images, data URLs for
-      // tiny inline assets.
-      "img-src 'self' data: blob: https:",
-      // Outbound media previews (blob: from MediaRecorder + file picker)
-      // and Supabase public-bucket audio/video the inbox renders.
-      "media-src 'self' blob: https://*.supabase.co",
-      "font-src 'self' data:",
-      // Supabase REST + realtime (WSS). All Meta API calls happen
-      // server-side, so graph.facebook.com does not belong here.
-      "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-    ].join("; "),
   },
 ] as const;
 

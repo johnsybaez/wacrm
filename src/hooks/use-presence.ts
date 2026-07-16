@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/client";
@@ -55,11 +55,11 @@ export function usePresence(enabled = true): UsePresenceResult {
   // one, and its `.on(...)` throws "cannot add postgres_changes
   // callbacks ... after subscribe()". A per-instance suffix keeps each
   // mount's channel topic unique.
-  const instanceId = useRef(
+  const [instanceId] = useState(() =>
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2),
-  ).current;
+  );
 
   // Presence rows keyed by user_id, held in immutable state — each
   // update replaces the Map so React renders and the derived getters
