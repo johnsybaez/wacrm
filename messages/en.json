@@ -14,6 +14,14 @@
     "noAccount": "Don't have an account?",
     "createAccount": "Create account"
   },
+  "MfaChallengePage": {
+    "title": "Two-factor authentication",
+    "description": "Enter the 6-digit code from your authenticator app.",
+    "codeLabel": "6-digit code",
+    "verify": "Verify",
+    "verifying": "Verifying…",
+    "signOut": "Not you? Sign out"
+  },
   "Sidebar": {
     "title": "CRM Template for WhatsApp",
     "dashboard": "Dashboard",
@@ -1564,7 +1572,25 @@
       "currentPasswordIncorrect": "Current password is incorrect",
       "passwordUpdateFailed": "Password update failed: {message}",
       "passwordUpdated": "Password updated",
-      
+
+      "twoFactorTitle": "Two-factor authentication",
+      "twoFactorDesc": "Add an extra step at login using an authenticator app (Google Authenticator, Authy, 1Password, etc.).",
+      "twoFactorEnable": "Enable two-factor authentication",
+      "twoFactorEnabledBadge": "Enabled",
+      "twoFactorDisable": "Disable",
+      "twoFactorEnrollTitle": "Set up two-factor authentication",
+      "twoFactorEnrollDesc": "Scan this QR code with your authenticator app, or enter the code manually, then enter the 6-digit code it generates.",
+      "twoFactorQrAlt": "QR code to scan with your authenticator app",
+      "twoFactorCodeLabel": "6-digit code",
+      "twoFactorVerify": "Verify and enable",
+      "twoFactorVerifying": "Verifying…",
+      "twoFactorEnabled": "Two-factor authentication enabled",
+      "twoFactorDisableConfirmTitle": "Disable two-factor authentication?",
+      "twoFactorDisableConfirmDesc": "You'll only need your password to sign in after this. You can re-enable it anytime.",
+      "twoFactorDisableConfirm": "Disable",
+      "twoFactorDisabling": "Disabling…",
+      "twoFactorDisabled": "Two-factor authentication disabled",
+
       "sessionsTitle": "Active sessions",
       "sessionsDesc": "Sign out of every device where you're logged in — including this one. Useful if you lost a laptop or shared your password.",
       "signOutAll": "Sign out of all devices",

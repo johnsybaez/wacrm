@@ -64,6 +64,15 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
+  // True when the signed-in user has a verified TOTP factor but this
+  // session hasn't completed the challenge yet (still aal1, needs
+  // aal2). getAuthenticatorAssuranceLevel() reads the aal claim off
+  // the current session's JWT — no extra network round trip. Users
+  // who never enrolled a factor have currentLevel === nextLevel
+  // (both aal1) and are unaffected.
+  const { data: aal } = user ? await supabase.auth.mfa.getAuthenticatorAssuranceLevel() : { data: null }
+  const needsMfa = !!user && !!aal && aal.nextLevel === 'aal2' && aal.currentLevel !== aal.nextLevel
+
   // getUser() transparently refreshes an expired access token, which
   // ROTATES the refresh token and writes the new cookies onto
   // `supabaseResponse` via setAll() above. Any response we return in
@@ -90,6 +99,10 @@ export async function middleware(request: NextRequest) {
   // they can accept the invitation in one click. Without this,
   // a forwarded invite link to someone who's already signed in
   // would silently drop them on /dashboard.
+  // A user mid-MFA-challenge (aal1, needsMfa) is sent to
+  // /mfa-challenge instead — they're not "logged in" enough yet to
+  // skip past the auth pages, but showing them the login form again
+  // would be confusing since their password already checked out.
   if (user && (
     request.nextUrl.pathname === '/login' ||
     request.nextUrl.pathname === '/signup' ||
@@ -97,7 +110,10 @@ export async function middleware(request: NextRequest) {
   )) {
     const url = request.nextUrl.clone()
     const inviteToken = request.nextUrl.searchParams.get('invite')
-    if (
+    if (needsMfa) {
+      url.pathname = '/mfa-challenge'
+      if (!inviteToken) url.search = ''
+    } else if (
       inviteToken &&
       (request.nextUrl.pathname === '/login' ||
         request.nextUrl.pathname === '/signup')
@@ -111,11 +127,17 @@ export async function middleware(request: NextRequest) {
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
-  // Protected pages - redirect to login if not authenticated
+  // Protected pages - redirect to login if not authenticated, or to
+  // /mfa-challenge if authenticated but the TOTP challenge for this
+  // session isn't done yet. Without this half of the enforcement, an
+  // attacker who has the password could just navigate straight to
+  // /dashboard and skip the challenge entirely — enrolling a factor
+  // would protect nothing.
   const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
-  if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+  if ((!user || needsMfa) && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
-    url.pathname = '/login'
+    url.pathname = needsMfa ? '/mfa-challenge' : '/login'
+    url.search = ''
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 

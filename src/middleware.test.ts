@@ -14,6 +14,13 @@ let refreshedCookies: Array<{
   value: string;
   options: Record<string, unknown>;
 }> = [];
+// Defaults to "no MFA enrolled" (currentLevel === nextLevel) so existing
+// signed-in scenarios are unaffected; individual tests override this to
+// exercise the aal1-needs-aal2 (needsMfa) redirect path.
+let mockAal: { currentLevel: string; nextLevel: string } = {
+  currentLevel: "aal1",
+  nextLevel: "aal1",
+};
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: (
@@ -31,6 +38,9 @@ vi.mock("@supabase/ssr", () => ({
         if (refreshedCookies.length) opts.cookies.setAll(refreshedCookies);
         return { data: { user: mockUser } };
       },
+      mfa: {
+        getAuthenticatorAssuranceLevel: async () => ({ data: mockAal }),
+      },
     },
   }),
 }));
@@ -43,6 +53,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
   mockUser = null;
   refreshedCookies = [];
+  mockAal = { currentLevel: "aal1", nextLevel: "aal1" };
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -109,5 +120,39 @@ describe("middleware — refreshed auth cookies survive redirects", () => {
     // No redirect — the normal NextResponse.next() already carries cookies.
     expect(res.headers.get("location")).toBeNull();
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
+  });
+});
+
+describe("middleware — MFA (aal1 → aal2) enforcement", () => {
+  it("redirects to /mfa-challenge instead of the dashboard when the challenge isn't done yet", async () => {
+    mockUser = { id: "user-1" };
+    mockAal = { currentLevel: "aal1", nextLevel: "aal2" };
+
+    const res = await middleware(
+      new NextRequest("https://app.test/dashboard"),
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/mfa-challenge");
+  });
+
+  it("sends a mid-challenge user from /login to /mfa-challenge, not /dashboard", async () => {
+    mockUser = { id: "user-1" };
+    mockAal = { currentLevel: "aal1", nextLevel: "aal2" };
+
+    const res = await middleware(new NextRequest("https://app.test/login"));
+
+    expect(res.headers.get("location")).toContain("/mfa-challenge");
+  });
+
+  it("does not redirect to /mfa-challenge once the session is aal2", async () => {
+    mockUser = { id: "user-1" };
+    mockAal = { currentLevel: "aal2", nextLevel: "aal2" };
+
+    const res = await middleware(
+      new NextRequest("https://app.test/dashboard"),
+    );
+
+    expect(res.headers.get("location")).toBeNull();
   });
 });

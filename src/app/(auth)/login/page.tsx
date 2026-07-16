@@ -61,6 +61,18 @@ function LoginPageInner() {
       return;
     }
 
+    // Password checked out, but if this account has a verified TOTP
+    // factor the session is only aal1 until the challenge completes —
+    // send them there instead of straight to the dashboard. Accounts
+    // with no factor enrolled have currentLevel === nextLevel and skip
+    // this untouched.
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.nextLevel === "aal2" && aal.nextLevel !== aal.currentLevel) {
+      const qs = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : "";
+      router.push(`/mfa-challenge${qs}`);
+      return;
+    }
+
     if (inviteToken) {
       router.push(`/join/${encodeURIComponent(inviteToken)}`);
     } else {
